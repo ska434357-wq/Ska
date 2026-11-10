@@ -1,0 +1,196 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Fiche produit comprimé de la Pharmacie Laafi Zanga",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number",
+          "description": "Identifiant numérique unique du produit"
+        },
+        "no": {
+          "type": "number",
+          "description": "Numéro d'ordre extrait de la fiche d'inventaire"
+        },
+        "designation": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Désignation commerciale du comprimé"
+        },
+        "quantite": {
+          "type": "number",
+          "description": "Quantité en stock disponible"
+        },
+        "prixCession": {
+          "type": "number",
+          "description": "Prix unitaire de cession en FCFA"
+        },
+        "prixVente": {
+          "type": "number",
+          "description": "Prix de vente au comptoir en FCFA"
+        },
+        "seuilAlerte": {
+          "type": "number",
+          "description": "Seuil d'alerte de stock bas (par défaut 10)"
+        },
+        "datePeremption": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Date de péremption ISO ou vide"
+        },
+        "categorie": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Catégorie thérapeutique du comprimé"
+        },
+        "fournisseur": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Fournisseur ou laboratoire fabricant"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Date de dernière modification"
+        }
+      },
+      "required": ["id", "no", "designation", "quantite", "prixCession", "prixVente", "seuilAlerte"]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "Historique des mouvements d'entrée, sortie et ajustement de stock",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Identifiant unique du mouvement"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date ISO d'enregistrement du mouvement"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["entree", "sortie", "ajustement"],
+          "description": "Type de transaction"
+        },
+        "productId": {
+          "type": "number",
+          "description": "Identifiant du produit associé"
+        },
+        "productName": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Désignation du produit au moment du mouvement"
+        },
+        "quantite": {
+          "type": "number",
+          "description": "Quantité mouvementée (positive pour entrée, négative pour sortie/ajustement)"
+        },
+        "stockApres": {
+          "type": "number",
+          "description": "Stock résiduel après transaction"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Motif ou note du mouvement"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Identifiant Firebase Auth du préparateur ou pharmacien"
+        }
+      },
+      "required": ["id", "date", "type", "productId", "productName", "quantite", "stockApres"]
+    },
+    "PharmacyMeta": {
+      "title": "PharmacyMeta",
+      "description": "Métadonnées de configuration et d'initialisation de la pharmacie",
+      "type": "object",
+      "properties": {
+        "initialized": {
+          "type": "boolean",
+          "description": "Indique si la base initiale des 302 produits a été importée"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "description": "Date de dernière synchronisation"
+        }
+      },
+      "required": ["initialized"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Bon de commande d'approvisionnement fournisseur de la Pharmacie Laafi Zanga",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Identifiant unique du bon de commande (ex: BC-2026-001)"
+        },
+        "orderNumber": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Numéro officiel du bon de commande"
+        },
+        "supplier": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Fournisseur ou grossiste répartiteur"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Date ISO de création du bon de commande"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["brouillon", "envoyee", "receptionnee", "annulee"],
+          "description": "Statut d'avancement de la commande"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Montant total estimé en FCFA"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Instructions de livraison ou références"
+        },
+        "receivedAt": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Date ISO de réception en stock si réceptionnée"
+        }
+      },
+      "required": ["id", "orderNumber", "supplier", "createdAt", "status", "totalAmount"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": {
+        "$ref": "#/entities/Product"
+      },
+      "description": "Collection des produits comprimés en stock"
+    },
+    "/movements/{movementId}": {
+      "schema": {
+        "$ref": "#/entities/StockMovement"
+      },
+      "description": "Journal d'audit horodaté des mouvements de stock"
+    },
+    "/orders/{orderId}": {
+      "schema": {
+        "$ref": "#/entities/Order"
+      },
+      "description": "Bons de commande d'approvisionnement auprès des laboratoires et grossistes"
+    },
+    "/meta/{metaId}": {
+      "schema": {
+        "$ref": "#/entities/PharmacyMeta"
+      },
+      "description": "Métadonnées globales du système"
+    }
+  }
+}

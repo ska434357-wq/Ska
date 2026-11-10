@@ -7,6 +7,8 @@ export interface Product {
   prixVente: number;
   seuilAlerte: number;
   datePeremption: string;
+  categorie?: string;
+  fournisseur?: string;
 }
 
 export interface StockMovement {

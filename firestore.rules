@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Catch-All Safety Net: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation for Product entity
+    function isValidProduct(data) {
+      return data.id is number &&
+        data.no is number &&
+        data.designation is string && data.designation.size() > 0 && data.designation.size() <= 200 &&
+        data.quantite is number && data.quantite >= 0 &&
+        data.prixCession is number && data.prixCession >= 0 &&
+        data.prixVente is number && data.prixVente >= 0 &&
+        data.seuilAlerte is number && data.seuilAlerte >= 1 &&
+        (!('categorie' in data) || (data.categorie is string && data.categorie.size() <= 100)) &&
+        (!('fournisseur' in data) || (data.fournisseur is string && data.fournisseur.size() <= 100));
+    }
+
+    // Validation for StockMovement entity
+    function isValidMovement(data) {
+      return data.id is string && data.id.size() <= 128 &&
+        data.date is string &&
+        data.type in ['entree', 'sortie', 'ajustement'] &&
+        data.productId is number &&
+        data.productName is string && data.productName.size() <= 200 &&
+        data.quantite is number &&
+        data.stockApres is number && data.stockApres >= 0;
+    }
+
+    // Validation for PharmacyMeta entity
+    function isValidMeta(data) {
+      return data.initialized is bool;
+    }
+
+    // Validation for Order entity
+    function isValidOrder(data) {
+      return data.id is string && data.id.size() <= 128 &&
+        data.orderNumber is string && data.orderNumber.size() <= 50 &&
+        data.supplier is string && data.supplier.size() <= 100 &&
+        data.createdAt is string &&
+        data.status in ['brouillon', 'envoyee', 'receptionnee', 'annulee'] &&
+        data.totalAmount is number && data.totalAmount >= 0 &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        (!('receivedAt' in data) || (data.receivedAt is string && data.receivedAt.size() <= 50));
+    }
+
+    // /products/{productId}
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(productId) && isValidProduct(incoming());
+      allow update: if isSignedIn() && isValidId(productId) && isValidProduct(incoming()) && incoming().id == existing().id;
+      allow delete: if isSignedIn() && isValidId(productId);
+    }
+
+    // /movements/{movementId} - Immutable audit log
+    match /movements/{movementId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(movementId) && isValidMovement(incoming());
+      // Movements cannot be updated or deleted once committed to preserve pharmacy accounting integrity
+      allow update, delete: if false;
+    }
+
+    // /orders/{orderId}
+    match /orders/{orderId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming());
+      allow update: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) && incoming().id == existing().id;
+      allow delete: if isSignedIn() && isValidId(orderId);
+    }
+
+    // /meta/{metaId}
+    match /meta/{metaId} {
+      allow read: if true;
+      allow write: if isSignedIn() && isValidId(metaId) && isValidMeta(incoming());
+    }
+  }
+}

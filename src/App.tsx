@@ -25,13 +25,45 @@ import {
   ArrowDownRight,
   FileSpreadsheet,
   Info,
-  X
+  X,
+  ShoppingCart,
+  FileText
 } from 'lucide-react';
 import { INITIAL_PRODUCTS, INITIAL_MOVEMENTS, Product, StockMovement } from './data/initialProducts';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { testConnection } from './firebase';
+import {
+  syncInitialDataToFirestore,
+  subscribeToFirestoreProducts,
+  subscribeToFirestoreMovements,
+  saveProductToFirestore,
+  deleteProductFromFirestore,
+  recordMovementInFirestore,
+  applyPhysicalInventoryInFirestore
+} from './services/firebaseSync';
+import { FirebaseAuthButton } from './components/FirebaseAuthButton';
+import { StockValueDonutChart } from './components/StockValueDonutChart';
+import {
+  getProductCategory,
+  getProductSupplier,
+  PHARMACY_CATEGORIES,
+  PHARMACY_SUPPLIERS
+} from './utils/pharmacyClassification';
+import { PurchaseOrder } from './types/order';
+import {
+  loadOrdersFromLocalStorage,
+  saveOrdersToLocalStorage,
+  subscribeToFirestoreOrders,
+  saveOrderToFirestore,
+  deleteOrderFromFirestore,
+  receiveOrderInFirestore
+} from './services/orderSync';
+import { OrdersManager } from './components/OrdersManager';
+import { QuickInventoryScanner } from './components/QuickInventoryScanner';
+import { OfficialInventoryReportModal } from './components/OfficialInventoryReportModal';
 
-type TabType = 'dashboard' | 'products' | 'movements' | 'inventory' | 'backup';
+type TabType = 'dashboard' | 'products' | 'movements' | 'inventory' | 'orders' | 'backup';
 type ProductFilterType = 'all' | 'in_stock' | 'low' | 'rupture' | 'expiring';
 type MovementFilterType = 'all' | 'entree' | 'sortie' | 'ajustement';
 type InventoryFilterType = 'all' | 'changed' | 'uncounted';
@@ -111,7 +143,12 @@ export default function App() {
   const [physicalCounts, setPhysicalCounts] = useState<Record<number, number>>({});
   const [inventorySearch, setInventorySearch] = useState('');
   const [inventoryFilter, setInventoryFilter] = useState<InventoryFilterType>('all');
+  const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState<string>('all');
   const [isInventoryConfirmModalOpen, setIsInventoryConfirmModalOpen] = useState(false);
+  const [isOfficialPVModalOpen, setIsOfficialPVModalOpen] = useState(false);
+
+  // Orders State (Commandes Fournisseurs)
+  const [orders, setOrders] = useState<PurchaseOrder[]>(() => loadOrdersFromLocalStorage());
 
   // Factory Reset Modal State
   const [isResetFactoryModalOpen, setIsResetFactoryModalOpen] = useState(false);
@@ -182,6 +219,89 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Firebase Firestore initial connection & real-time sync
+  useEffect(() => {
+    testConnection();
+
+    // Live subscription to Firestore products
+    const unsubProducts = subscribeToFirestoreProducts(cloudProducts => {
+      if (cloudProducts && cloudProducts.length > 0) {
+        setProducts(cloudProducts);
+      }
+    });
+
+    // Live subscription to Firestore stock movements
+    const unsubMovements = subscribeToFirestoreMovements(cloudMovements => {
+      if (cloudMovements && cloudMovements.length > 0) {
+        setMovements(cloudMovements);
+      }
+    });
+
+    // Live subscription to Firestore purchase orders
+    const unsubOrders = subscribeToFirestoreOrders(cloudOrders => {
+      if (cloudOrders && cloudOrders.length > 0) {
+        setOrders(cloudOrders);
+      }
+    });
+
+    return () => {
+      unsubProducts();
+      unsubMovements();
+      unsubOrders();
+    };
+  }, []);
+
+  // Save orders to localStorage on changes
+  useEffect(() => {
+    saveOrdersToLocalStorage(orders);
+  }, [orders]);
+
+  // Order Handlers
+  const handleSaveOrder = (order: PurchaseOrder) => {
+    setOrders(prev => {
+      const idx = prev.findIndex(o => o.id === order.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = order;
+        return next;
+      }
+      return [order, ...prev];
+    });
+    saveOrderToFirestore(order).catch(e => console.warn('Erreur Firestore sauvegarde commande:', e));
+  };
+
+  const handleDeleteOrder = (orderId: string) => {
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+    deleteOrderFromFirestore(orderId).catch(e => console.warn('Erreur Firestore suppression commande:', e));
+  };
+
+  const handleReceiveOrder = async (order: PurchaseOrder) => {
+    const prodMap = new Map(products.map(p => [p.id, p]));
+    const { updatedProducts, newMovements } = await receiveOrderInFirestore(order, prodMap);
+
+    // Update local products state
+    setProducts(prev => {
+      const updatedMap = new Map(updatedProducts.map(p => [p.id, p]));
+      return prev.map(p => updatedMap.get(p.id) || p);
+    });
+
+    // Update local movements
+    setMovements(prev => [...newMovements, ...prev]);
+
+    // Update order status in local state
+    setOrders(prev =>
+      prev.map(o =>
+        o.id === order.id ? { ...o, status: 'receptionnee', receivedAt: new Date().toISOString() } : o
+      )
+    );
+
+    showToast(
+      'Commande Réceptionnée en Stock !',
+      `Les ${order.items.length} références du bon ${order.orderNumber} ont été créditées en stock.`,
+      'success'
+    );
+  };
 
   // Toast dispatch
   const showToast = (title: string, description: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
@@ -332,7 +452,9 @@ export default function App() {
       if (q) {
         const matchNo = String(p.no).includes(q);
         const matchName = (p.designation || '').toLowerCase().includes(q);
-        if (!matchNo && !matchName) return false;
+        const matchCat = getProductCategory(p.designation, p.categorie).toLowerCase().includes(q);
+        const matchSupplier = getProductSupplier(p.designation, p.fournisseur, p.id).toLowerCase().includes(q);
+        if (!matchNo && !matchName && !matchCat && !matchSupplier) return false;
       }
 
       if (productFilter === 'in_stock') {
@@ -485,6 +607,12 @@ export default function App() {
     };
 
     setMovements(prev => [newMovement, ...prev]);
+
+    // Persist to Firebase Firestore
+    recordMovementInFirestore(newMovement, newStock).catch(err => {
+      console.warn('Erreur synchronisation Firestore mouvement:', err);
+    });
+
     showToast(
       'Mouvement enregistré',
       `${mvtType === 'entree' ? 'Entrée de +' : 'Sortie de -'}${parsedMvtQty} u. sur ${selectedMovementProduct.designation}`,
@@ -528,6 +656,8 @@ export default function App() {
     const prixVente = Math.max(0, Number(editingProduct.prixVente) || Math.round(prixCession * 1.35));
     const seuilAlerte = Math.max(1, Number(editingProduct.seuilAlerte) || 10);
     const datePeremption = editingProduct.datePeremption || '';
+    const categorie = editingProduct.categorie?.trim() || getProductCategory(designation);
+    const fournisseur = editingProduct.fournisseur?.trim() || getProductSupplier(designation, undefined, editingProduct.id);
 
     if (editingProduct.id) {
       // Edit
@@ -548,22 +678,26 @@ export default function App() {
         setMovements(prev => [newMvt, ...prev]);
       }
 
+      const updatedProduct: Product = {
+        id: editingProduct.id,
+        no,
+        designation,
+        quantite,
+        prixCession,
+        prixVente,
+        seuilAlerte,
+        datePeremption,
+        categorie,
+        fournisseur
+      };
+
       setProducts(prev =>
-        prev.map(p =>
-          p.id === editingProduct.id
-            ? {
-                ...p,
-                no,
-                designation,
-                quantite,
-                prixCession,
-                prixVente,
-                seuilAlerte,
-                datePeremption
-              }
-            : p
-        )
+        prev.map(p => (p.id === editingProduct.id ? updatedProduct : p))
       );
+
+      // Persist edited product to Firestore
+      saveProductToFirestore(updatedProduct).catch(e => console.warn('Erreur Firestore edit produit:', e));
+
       showToast('Fiche mise à jour', `Le produit « ${designation} » a été modifié.`, 'success');
     } else {
       // Create New
@@ -576,9 +710,14 @@ export default function App() {
         prixCession,
         prixVente,
         seuilAlerte,
-        datePeremption
+        datePeremption,
+        categorie,
+        fournisseur
       };
       setProducts(prev => [...prev, newProd]);
+
+      // Persist new product to Firestore
+      saveProductToFirestore(newProd).catch(e => console.warn('Erreur Firestore nouveau produit:', e));
 
       if (quantite > 0) {
         const newMvt: StockMovement = {
@@ -592,6 +731,7 @@ export default function App() {
           note: 'Création du produit avec stock initial'
         };
         setMovements(prev => [newMvt, ...prev]);
+        recordMovementInFirestore(newMvt, quantite).catch(e => console.warn('Erreur Firestore mvt:', e));
       }
 
       showToast('Nouveau comprimé', `« ${designation} » a été ajouté au catalogue.`, 'success');
@@ -605,6 +745,10 @@ export default function App() {
   const executeDeleteProduct = () => {
     if (!productToDelete) return;
     setProducts(prev => prev.filter(p => p.id !== productToDelete.id));
+
+    // Delete in Firestore
+    deleteProductFromFirestore(productToDelete.id).catch(e => console.warn('Erreur Firestore delete:', e));
+
     showToast('Produit supprimé', `« ${productToDelete.designation} » a été retiré.`, 'info');
     setProductToDelete(null);
   };
@@ -663,6 +807,11 @@ export default function App() {
         if (!matchNo && !matchName) return false;
       }
 
+      if (inventoryCategoryFilter !== 'all') {
+        const cat = getProductCategory(p.designation, p.categorie);
+        if (cat !== inventoryCategoryFilter) return false;
+      }
+
       const isCounted = p.id in physicalCounts;
       const diff = isCounted ? physicalCounts[p.id] - p.quantite : 0;
 
@@ -673,7 +822,7 @@ export default function App() {
       }
       return true;
     });
-  }, [products, inventorySearch, inventoryFilter, physicalCounts]);
+  }, [products, inventorySearch, inventoryFilter, inventoryCategoryFilter, physicalCounts]);
 
   // 1-Click Inventory Adjustment Validation
   const executeInventoryAdjustment = () => {
@@ -710,6 +859,20 @@ export default function App() {
     );
 
     setMovements(prev => [...newMovements, ...prev]);
+
+    // Batch persist adjustments to Firestore
+    const firestoreAdjustments = newMovements.map(m => {
+      const prod = products.find(p => p.id === m.productId);
+      return {
+        product: prod ? { ...prod, quantite: m.stockApres } : ({ id: m.productId } as Product),
+        newStock: m.stockApres,
+        movement: m
+      };
+    });
+    applyPhysicalInventoryInFirestore(firestoreAdjustments).catch(err => {
+      console.warn('Erreur synchro cloud inventaire:', err);
+    });
+
     setPhysicalCounts({});
     setIsInventoryConfirmModalOpen(false);
 
@@ -923,6 +1086,24 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('orders')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-semibold text-sm transition-all lg:justify-start justify-center relative ${
+              activeTab === 'orders'
+                ? 'bg-[#115e59] text-white shadow-sm ring-1 ring-teal-400/30'
+                : 'text-[#99cfc5] hover:bg-[#134e48] hover:text-white'
+            }`}
+            title="Commandes Fournisseurs"
+          >
+            <ShoppingCart className="w-5 h-5 shrink-0" />
+            <span className="hidden lg:inline flex-1 text-left">Commandes</span>
+            {orders.filter(o => o.status === 'envoyee' || o.status === 'brouillon').length > 0 && (
+              <span className="hidden lg:inline bg-amber-500 text-slate-950 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                {orders.filter(o => o.status === 'envoyee' || o.status === 'brouillon').length}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('backup')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-semibold text-sm transition-all lg:justify-start justify-center ${
               activeTab === 'backup'
@@ -962,16 +1143,27 @@ export default function App() {
             <div className="w-8 h-8 rounded-lg bg-teal-600 flex md:hidden items-center justify-center text-white font-bold text-xs">
               LZ
             </div>
-            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-              {activeTab === 'dashboard' && 'Tableau de bord'}
-              {activeTab === 'products' && 'Catalogue des Comprimés'}
-              {activeTab === 'movements' && 'Entrées & Sorties de Stock'}
-              {activeTab === 'inventory' && 'Inventaire Physique & Rapprochement'}
-              {activeTab === 'backup' && 'Sauvegarde & Exportation'}
-            </h2>
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] text-teal-700 dark:text-teal-400 font-bold uppercase tracking-wider">
+                <span>Pharmacie Laafi Zanga</span>
+                <span className="text-slate-300 dark:text-slate-600">•</span>
+                <span className="text-slate-500 dark:text-slate-400 font-medium">Gestion Officine</span>
+              </div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-none mt-0.5">
+                {activeTab === 'dashboard' && 'Tableau de bord & Répartition'}
+                {activeTab === 'products' && 'Catalogue des Comprimés'}
+                {activeTab === 'movements' && 'Entrées & Sorties de Stock'}
+                {activeTab === 'inventory' && 'Inventaire Physique & Rapprochement'}
+                {activeTab === 'orders' && 'Commandes Fournisseurs & Approvisionnement'}
+                {activeTab === 'backup' && 'Sauvegarde & Exportation'}
+              </h2>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Cloud Firestore & Google Auth Status */}
+            <FirebaseAuthButton products={products} movements={movements} onShowToast={showToast} />
+
             {/* In-App PWA Install Button */}
             <PWAInstallButton variant="button" />
 
@@ -1132,6 +1324,20 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Interactive SVG Circular Stock Value Distribution Chart */}
+            <StockValueDonutChart
+              products={products}
+              onSelectCategory={(targetName) => {
+                setActiveTab('products');
+                setProductSearch(targetName);
+                showToast(
+                  'Filtre appliqué',
+                  `Affichage des comprimés associés à « ${targetName} ».`,
+                  'info'
+                );
+              }}
+            />
 
             {/* CSS Charts Section */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1551,7 +1757,16 @@ export default function App() {
                               #{p.no}
                             </td>
                             <td className="p-3.5 font-bold text-slate-800 dark:text-slate-100" data-l="Désignation">
-                              {p.designation}
+                              <div>{p.designation}</div>
+                              <div className="text-[11px] font-normal text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                <span className="inline-block px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-teal-700 dark:text-teal-400 font-semibold text-[10px]">
+                                  {getProductCategory(p.designation, p.categorie)}
+                                </span>
+                                <span>•</span>
+                                <span className="text-slate-400 dark:text-slate-500 text-[10px]">
+                                  {getProductSupplier(p.designation, p.fournisseur, p.no)}
+                                </span>
+                              </div>
                             </td>
                             <td className="p-3.5 font-extrabold text-sm tabular-nums" data-l="Stock">
                               {formatNumber(p.quantite)} u.
@@ -2008,6 +2223,21 @@ export default function App() {
         {/* TAB 4: INVENTAIRE PHYSIQUE */}
         {activeTab === 'inventory' && (
           <main className="p-4 md:p-8 space-y-6">
+            {/* Express Scanner & Touch Counting Bar */}
+            <QuickInventoryScanner
+              products={products}
+              physicalCounts={physicalCounts}
+              onUpdateCount={(pid, count) => setPhysicalCounts(prev => ({ ...prev, [pid]: count }))}
+              onClearCount={pid =>
+                setPhysicalCounts(prev => {
+                  const next = { ...prev };
+                  delete next[pid];
+                  return next;
+                })
+              }
+              onShowToast={showToast}
+            />
+
             <div className="bg-white dark:bg-[#111c1e] rounded-2xl border border-slate-200 dark:border-[#21373a] shadow-sm p-6 space-y-6">
               {/* Header explanation & action buttons */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
@@ -2022,7 +2252,16 @@ export default function App() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setIsOfficialPVModalOpen(true)}
+                    className="h-10 px-3.5 rounded-xl border border-teal-600 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/50 font-bold text-xs uppercase tracking-wider transition flex items-center gap-1.5"
+                    title="Générer et imprimer le procès-verbal d'inventaire officiel"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>PV Officiel</span>
+                  </button>
+
                   <button
                     onClick={() => {
                       setPhysicalCounts({});
@@ -2032,12 +2271,13 @@ export default function App() {
                   >
                     Effacer la saisie
                   </button>
+
                   <button
                     onClick={() => setIsInventoryConfirmModalOpen(true)}
                     className="h-10 px-5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs uppercase tracking-wider transition shadow-md shadow-teal-900/20 flex items-center gap-2"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    Valider et ajuster l'inventaire
+                    <span>Valider et ajuster</span>
                   </button>
                 </div>
               </div>
@@ -2097,37 +2337,52 @@ export default function App() {
                   />
                 </div>
 
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
-                  <button
-                    onClick={() => setInventoryFilter('all')}
-                    className={`px-3 py-1.5 rounded-lg transition ${
-                      inventoryFilter === 'all'
-                        ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={inventoryCategoryFilter}
+                    onChange={e => setInventoryCategoryFilter(e.target.value)}
+                    className="h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none"
                   >
-                    Tous (302)
-                  </button>
-                  <button
-                    onClick={() => setInventoryFilter('changed')}
-                    className={`px-3 py-1.5 rounded-lg transition ${
-                      inventoryFilter === 'changed'
-                        ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Avec écart ({inventoryStats.diffCount})
-                  </button>
-                  <button
-                    onClick={() => setInventoryFilter('uncounted')}
-                    className={`px-3 py-1.5 rounded-lg transition ${
-                      inventoryFilter === 'uncounted'
-                        ? 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Non encore saisis
-                  </button>
+                    <option value="all">Tous les rayons / classes</option>
+                    {PHARMACY_CATEGORIES.map(c => (
+                      <option key={c.name} value={c.name}>
+                        Rayon : {c.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+                    <button
+                      onClick={() => setInventoryFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg transition ${
+                        inventoryFilter === 'all'
+                          ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Tous ({products.length})
+                    </button>
+                    <button
+                      onClick={() => setInventoryFilter('changed')}
+                      className={`px-3 py-1.5 rounded-lg transition ${
+                        inventoryFilter === 'changed'
+                          ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Avec écart ({inventoryStats.diffCount})
+                    </button>
+                    <button
+                      onClick={() => setInventoryFilter('uncounted')}
+                      className={`px-3 py-1.5 rounded-lg transition ${
+                        inventoryFilter === 'uncounted'
+                          ? 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Non saisis
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2139,7 +2394,7 @@ export default function App() {
                       <th className="p-3 w-16">N°</th>
                       <th className="p-3">Désignation</th>
                       <th className="p-3 text-right">Stock Théorique</th>
-                      <th className="p-3 text-right w-36">Quantité Comptée</th>
+                      <th className="p-3 text-right w-48">Quantité Comptée</th>
                       <th className="p-3 text-right">Écart en Direct</th>
                       <th className="p-3 text-right">Impact Valeur</th>
                     </tr>
@@ -2156,31 +2411,69 @@ export default function App() {
                             #{p.no}
                           </td>
                           <td className="p-3 font-bold text-slate-800 dark:text-slate-100" data-l="Désignation">
-                            {p.designation}
+                            <div>{p.designation}</div>
+                            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">
+                              {getProductCategory(p.designation, p.categorie)}
+                            </div>
                           </td>
                           <td className="p-3 text-right tabular-nums font-bold text-slate-600 dark:text-slate-300" data-l="Stock Théorique">
                             {p.quantite} u.
                           </td>
                           <td className="p-3 text-right" data-l="Quantité Comptée">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              placeholder="—"
-                              value={countedVal}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setPhysicalCounts(prev => {
-                                  if (val === '') {
-                                    const next = { ...prev };
-                                    delete next[p.id];
-                                    return next;
-                                  }
-                                  return { ...prev, [p.id]: Math.max(0, parseInt(val, 10) || 0) };
-                                });
-                              }}
-                              className="w-24 h-9 px-2 text-right font-extrabold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-teal-500 outline-none"
-                            />
+                            <div className="inline-flex items-center gap-1 justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const cur = hasCount ? physicalCounts[p.id] : 0;
+                                  setPhysicalCounts(prev => ({ ...prev, [p.id]: Math.max(0, cur - 1) }));
+                                }}
+                                className="w-6 h-8 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-extrabold text-xs flex items-center justify-center transition"
+                                title="-1 unité"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                placeholder="—"
+                                value={countedVal}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setPhysicalCounts(prev => {
+                                    if (val === '') {
+                                      const next = { ...prev };
+                                      delete next[p.id];
+                                      return next;
+                                    }
+                                    return { ...prev, [p.id]: Math.max(0, parseInt(val, 10) || 0) };
+                                  });
+                                }}
+                                className="w-16 h-8 px-1 text-right font-extrabold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-teal-500 outline-none text-xs tabular-nums"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const cur = hasCount ? physicalCounts[p.id] : 0;
+                                  setPhysicalCounts(prev => ({ ...prev, [p.id]: cur + 1 }));
+                                }}
+                                className="w-6 h-8 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-extrabold text-xs flex items-center justify-center transition"
+                                title="+1 unité"
+                              >
+                                +
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPhysicalCounts(prev => ({ ...prev, [p.id]: p.quantite }));
+                                  showToast('Conforme', `#${p.no} ${p.designation} marqué conforme (${p.quantite} u.).`, 'info');
+                                }}
+                                className="h-8 px-2 rounded bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900 text-teal-700 dark:text-teal-300 font-black text-[10px] transition"
+                                title="Marquer conforme au stock théorique"
+                              >
+                                ✓
+                              </button>
+                            </div>
                           </td>
                           <td className="p-3 text-right" data-l="Écart">
                             {diff === null ? (
@@ -2220,7 +2513,21 @@ export default function App() {
           </main>
         )}
 
-        {/* TAB 5: SAUVEGARDE & EXPORT */}
+        {/* TAB 5: GESTION DES COMMANDES & APPROVISIONNEMENT */}
+        {activeTab === 'orders' && (
+          <main className="p-4 md:p-8 space-y-6">
+            <OrdersManager
+              products={products}
+              orders={orders}
+              onSaveOrder={handleSaveOrder}
+              onDeleteOrder={handleDeleteOrder}
+              onReceiveOrder={handleReceiveOrder}
+              onShowToast={showToast}
+            />
+          </main>
+        )}
+
+        {/* TAB 6: SAUVEGARDE & EXPORT */}
         {activeTab === 'backup' && (
           <main className="p-4 md:p-8 space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2383,6 +2690,16 @@ export default function App() {
         </button>
 
         <button
+          onClick={() => setActiveTab('orders')}
+          className={`flex flex-col items-center gap-1 p-2 rounded-xl text-[10px] font-bold relative ${
+            activeTab === 'orders' ? 'text-teal-300' : 'text-[#99cfc5]'
+          }`}
+        >
+          <ShoppingCart className="w-5 h-5" />
+          <span>Commandes</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('backup')}
           className={`flex flex-col items-center gap-1 p-2 rounded-xl text-[10px] font-bold ${
             activeTab === 'backup' ? 'text-teal-300' : 'text-[#99cfc5]'
@@ -2452,6 +2769,42 @@ export default function App() {
                   onChange={e => setEditingProduct({ ...editingProduct, designation: e.target.value })}
                   className="w-full h-11 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-bold"
                 />
+              </div>
+
+              {/* Catégorie & Fournisseur */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Classe thérapeutique
+                  </label>
+                  <select
+                    value={editingProduct.categorie || getProductCategory(editingProduct.designation || '')}
+                    onChange={e => setEditingProduct({ ...editingProduct, categorie: e.target.value })}
+                    className="w-full h-11 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200"
+                  >
+                    {PHARMACY_CATEGORIES.map(cat => (
+                      <option key={cat.name} value={cat.name}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Laboratoire / Fournisseur
+                  </label>
+                  <select
+                    value={editingProduct.fournisseur || getProductSupplier(editingProduct.designation || '', editingProduct.fournisseur, editingProduct.no)}
+                    onChange={e => setEditingProduct({ ...editingProduct, fournisseur: e.target.value })}
+                    className="w-full h-11 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200"
+                  >
+                    {PHARMACY_SUPPLIERS.map(sup => (
+                      <option key={sup.name} value={sup.name}>
+                        {sup.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -2691,6 +3044,15 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MODAL 5: PROCÈS-VERBAL OFFICIEL D'INVENTAIRE */}
+      <OfficialInventoryReportModal
+        products={products}
+        physicalCounts={physicalCounts}
+        isOpen={isOfficialPVModalOpen}
+        onClose={() => setIsOfficialPVModalOpen(false)}
+        onShowToast={showToast}
+      />
 
       {/* TOAST NOTIFICATION CONTAINER (Fixed bottom-right) */}
       <div className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 flex flex-col gap-2 max-w-sm w-[calc(100%-32px)] pointer-events-none">
