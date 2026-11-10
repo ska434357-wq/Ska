@@ -1,0 +1,6 @@
+{
+  "name": "Pharmacie Laafi Zanga - Inventaire & Stock",
+  "description": "Application web de gestion de stock et d'inventaire pharmaceutique (forme comprimé) pour la Pharmacie Laafi Zanga.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+:root {
+  --font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --sidebar-bg: #0b3b36;
+  --sidebar-hover: #134e48;
+  --sidebar-active: #115e59;
+  --sidebar-text: #e6f4f1;
+  --sidebar-text-muted: #99cfc5;
+  --accent: #14b8a6;
+  --accent-light: #2dd4bf;
+}
+
+body {
+  font-family: var(--font-family);
+  overflow-x: hidden;
+}
+
+/* Tabular numbers for financial and stock figures */
+.tabular-nums, td, .stat-value, .money, .badge {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
+
+/* Responsive Table into Cards on Mobile (< 700px) */
+@media (max-width: 700px) {
+  table.responsive-table thead {
+    display: none !important;
+  }
+
+  table.responsive-table, 
+  table.responsive-table tbody, 
+  table.responsive-table tr, 
+  table.responsive-table td {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  table.responsive-table tbody tr {
+    margin-bottom: 12px !important;
+    border: 1px solid rgba(226, 232, 240, 0.8) !important;
+    border-radius: 12px !important;
+    background: #ffffff !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+    overflow: hidden !important;
+  }
+
+  .dark table.responsive-table tbody tr {
+    border-color: #21373a !important;
+    background: #111c1e !important;
+  }
+
+  table.responsive-table td {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 10px 14px !important;
+    border-bottom: 1px solid rgba(241, 245, 249, 0.8) !important;
+    text-align: right !important;
+  }
+
+  .dark table.responsive-table td {
+    border-bottom-color: #1e3538 !important;
+  }
+
+  table.responsive-table td:last-child {
+    border-bottom: none !important;
+  }
+
+  table.responsive-table td::before {
+    content: attr(data-l);
+    font-weight: 700;
+    font-size: 12px;
+    color: #64748b;
+    text-align: left;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+
+  .dark table.responsive-table td::before {
+    color: #94a3b8;
+  }
+}
