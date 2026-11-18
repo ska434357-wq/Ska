@@ -4,7 +4,7 @@ import { initializeFirestore, getFirestore, doc, getDocFromServer } from 'fireba
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase App
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 // Configure Firestore with auto-detect long polling for iframe preview stability
 initializeFirestore(

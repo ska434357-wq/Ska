@@ -27,8 +27,31 @@ import {
   Info,
   X,
   ShoppingCart,
-  FileText
+  FileText,
+  Sparkles,
+  Bell,
+  LifeBuoy,
+  MessageSquarePlus,
+  User,
+  Settings,
+  Shield,
+  Menu
 } from 'lucide-react';
+import {
+  DigiSoliaProvider,
+  useDigiSolia
+} from './digisolia/hooks/useDigiSolia';
+import { SyncStatusBadge } from './digisolia/components/SyncStatusBadge';
+import { DigiSoliaLogo } from './digisolia/components/DigiSoliaLogo';
+import { WelcomePage } from './digisolia/features/WelcomePage';
+import { FrameworkHome, DafNavigationTarget } from './digisolia/features/FrameworkHome';
+import { NotificationsModule } from './digisolia/features/NotificationsModule';
+import { SupportCenter } from './digisolia/features/SupportCenter';
+import { FeedbackModule } from './digisolia/features/FeedbackModule';
+import { UserProfileModule } from './digisolia/features/UserProfileModule';
+import { SettingsModule } from './digisolia/features/SettingsModule';
+import { AboutModule } from './digisolia/features/AboutModule';
+import { DigiSoliaAdmin } from './digisolia/admin/DigiSoliaAdmin';
 import { INITIAL_PRODUCTS, INITIAL_MOVEMENTS, Product, StockMovement } from './data/initialProducts';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -63,7 +86,14 @@ import { OrdersManager } from './components/OrdersManager';
 import { QuickInventoryScanner } from './components/QuickInventoryScanner';
 import { OfficialInventoryReportModal } from './components/OfficialInventoryReportModal';
 
-type TabType = 'dashboard' | 'products' | 'movements' | 'inventory' | 'orders' | 'backup';
+type TabType =
+  | 'dashboard'
+  | 'products'
+  | 'movements'
+  | 'inventory'
+  | 'orders'
+  | 'backup'
+  | DafNavigationTarget;
 type ProductFilterType = 'all' | 'in_stock' | 'low' | 'rupture' | 'expiring';
 type MovementFilterType = 'all' | 'entree' | 'sortie' | 'ajustement';
 type InventoryFilterType = 'all' | 'changed' | 'uncounted';
@@ -79,7 +109,15 @@ const STORAGE_KEY_PRODUCTS = 'laafi_zanga_products_react_v1';
 const STORAGE_KEY_MOVEMENTS = 'laafi_zanga_movements_react_v1';
 const STORAGE_KEY_THEME = 'laafi_zanga_theme_react_v1';
 
-export default function App() {
+function AppContent() {
+  const {
+    config: dafConfig,
+    hasSeenWelcome,
+    unreadNotificationsCount,
+    isAnyAdmin
+  } = useDigiSolia();
+  const [isMobileDafDrawerOpen, setIsMobileDafDrawerOpen] = useState(false);
+
   // Main Data States with localStorage & safe memory fallback
   const [products, setProducts] = useState<Product[]>(() => {
     try {
@@ -1007,6 +1045,40 @@ export default function App() {
     showToast('Réinitialisation terminée', 'Base rétablie aux 302 comprimés originaux de la fiche.', 'info');
   };
 
+  if (!hasSeenWelcome || activeTab === 'daf_welcome') {
+    return (
+      <WelcomePage
+        onStart={() => setActiveTab('dashboard')}
+        onOpenSupport={() => setActiveTab('daf_support')}
+      />
+    );
+  }
+
+  const dafNavItems: {
+    id: DafNavigationTarget;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    badge?: number;
+    adminOnly?: boolean;
+  }[] = [
+    { id: 'daf_home', label: 'Accueil DigiSolia', icon: Sparkles },
+    {
+      id: 'daf_notifications',
+      label: 'Notifications',
+      icon: Bell,
+      badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined
+    },
+    { id: 'daf_support', label: 'Centre d’assistance', icon: LifeBuoy },
+    { id: 'daf_feedback', label: 'Donner mon avis', icon: MessageSquarePlus },
+    { id: 'daf_profile', label: 'Mon profil', icon: User },
+    { id: 'daf_settings', label: 'Paramètres', icon: Settings },
+    { id: 'daf_about', label: 'À propos', icon: Info },
+    { id: 'daf_welcome', label: 'Présentation', icon: FileText },
+    ...(isAnyAdmin
+      ? [{ id: 'daf_admin' as DafNavigationTarget, label: 'DIGISOLIA ADMIN', icon: Shield, adminOnly: true }]
+      : [])
+  ];
+
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-[#0a1012] text-slate-900 dark:text-slate-100 font-sans">
       {/* SIDEBAR NAVIGATION (Desktop: 236px, Tablet 821-1100px: 68px, Mobile: hidden) */}
@@ -1115,6 +1187,41 @@ export default function App() {
             <Database className="w-5 h-5 shrink-0" />
             <span className="hidden lg:inline">Sauvegarde & Export</span>
           </button>
+
+          {/* Écosystème DigiSolia App Framework */}
+          <div className="pt-3 mt-3 border-t border-white/10 space-y-1">
+            <div className="hidden lg:flex items-center justify-between px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-sky-300/80">
+              <span>Écosystème DigiSolia</span>
+            </div>
+            {dafNavItems.map(item => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl font-semibold text-xs transition-all lg:justify-start justify-center relative ${
+                    isActive
+                      ? 'bg-[#2783C7] text-white shadow-sm'
+                      : item.adminOnly
+                      ? 'text-sky-300 hover:bg-[#163B65] hover:text-white'
+                      : 'text-[#99cfc5] hover:bg-[#134e48] hover:text-white'
+                  }`}
+                  title={item.label}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="hidden lg:inline flex-1 text-left truncate">
+                    {item.label}
+                  </span>
+                  {item.badge !== undefined && (
+                    <span className="hidden lg:inline bg-[#2783C7] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums">
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </nav>
 
         {/* PWA Install Promotion in Sidebar */}
@@ -1125,10 +1232,12 @@ export default function App() {
         {/* Sidebar Footer */}
         <div className="p-4 border-t border-white/10 hidden lg:flex flex-col gap-2 text-xs text-[#99cfc5]">
           <div className="flex items-center gap-1.5 bg-white/5 px-2.5 py-1.5 rounded-lg text-teal-300 font-bold">
-            <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
-            Devise : Franc CFA (FCFA)
+            <span>Devise : Franc CFA (FCFA)</span>
           </div>
-          <div>Total comprimés : 302 réf.</div>
+          <div className="flex items-center justify-between text-[11px] text-[#99cfc5]/80">
+            <span>Total comprimés : 302 réf.</span>
+            <span>DAF v1.0</span>
+          </div>
         </div>
       </aside>
 
@@ -1140,14 +1249,24 @@ export default function App() {
         {/* TOP BAR */}
         <header className="sticky top-0 z-30 h-16 bg-white/90 dark:bg-[#111c1e]/90 backdrop-blur border-b border-slate-200 dark:border-[#21373a] px-4 md:px-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-teal-600 flex md:hidden items-center justify-center text-white font-bold text-xs">
-              LZ
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsMobileDafDrawerOpen(true)}
+              className="w-9 h-9 rounded-xl bg-[#163B65] text-white flex md:hidden items-center justify-center relative shrink-0"
+              title="Menu DigiSolia & Services"
+            >
+              <Menu className="w-4 h-4" />
+              {unreadNotificationsCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#2783C7] text-[9px] font-bold flex items-center justify-center tabular-nums">
+                  {unreadNotificationsCount}
+                </span>
+              )}
+            </button>
             <div>
               <div className="flex items-center gap-1.5 text-[10px] text-teal-700 dark:text-teal-400 font-bold uppercase tracking-wider">
                 <span>Pharmacie Laafi Zanga</span>
                 <span className="text-slate-300 dark:text-slate-600">•</span>
-                <span className="text-slate-500 dark:text-slate-400 font-medium">Gestion Officine</span>
+                <span className="text-[#2783C7] dark:text-sky-400 font-semibold">DigiSolia Ecosystem</span>
               </div>
               <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-none mt-0.5">
                 {activeTab === 'dashboard' && 'Tableau de bord & Répartition'}
@@ -1156,11 +1275,23 @@ export default function App() {
                 {activeTab === 'inventory' && 'Inventaire Physique & Rapprochement'}
                 {activeTab === 'orders' && 'Commandes Fournisseurs & Approvisionnement'}
                 {activeTab === 'backup' && 'Sauvegarde & Exportation'}
+                {activeTab === 'daf_home' && 'Accueil DigiSolia'}
+                {activeTab === 'daf_notifications' && 'Notifications DigiSolia'}
+                {activeTab === 'daf_support' && 'Centre d’assistance'}
+                {activeTab === 'daf_feedback' && 'Avis & Suggestions'}
+                {activeTab === 'daf_profile' && 'Profil Utilisateur'}
+                {activeTab === 'daf_settings' && 'Paramètres & Synchronisation'}
+                {activeTab === 'daf_about' && 'À propos de DigiSolia'}
+                {activeTab === 'daf_admin' && 'DIGISOLIA ADMIN'}
               </h2>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5">
+            <div className="hidden xl:block">
+              <SyncStatusBadge compact />
+            </div>
+
             {/* Cloud Firestore & Google Auth Status */}
             <FirebaseAuthButton products={products} movements={movements} onShowToast={showToast} />
 
@@ -2645,7 +2776,119 @@ export default function App() {
             </div>
           </main>
         )}
+
+        {/* MODULES DIGISOLIA APP FRAMEWORK (DAF) */}
+        {activeTab === 'daf_home' && (
+          <main className="p-4 md:p-8">
+            <FrameworkHome
+              onNavigateHost={target => setActiveTab(target as TabType)}
+              onNavigateDaf={target => setActiveTab(target)}
+            />
+          </main>
+        )}
+        {activeTab === 'daf_notifications' && (
+          <main className="p-4 md:p-8">
+            <NotificationsModule />
+          </main>
+        )}
+        {activeTab === 'daf_support' && (
+          <main className="p-4 md:p-8">
+            <SupportCenter />
+          </main>
+        )}
+        {activeTab === 'daf_feedback' && (
+          <main className="p-4 md:p-8">
+            <FeedbackModule />
+          </main>
+        )}
+        {activeTab === 'daf_profile' && (
+          <main className="p-4 md:p-8">
+            <UserProfileModule />
+          </main>
+        )}
+        {activeTab === 'daf_settings' && (
+          <main className="p-4 md:p-8">
+            <SettingsModule
+              isDark={isDark}
+              onToggleTheme={nextDark => setIsDark(nextDark)}
+              onOpenHostBackup={() => setActiveTab('backup')}
+            />
+          </main>
+        )}
+        {activeTab === 'daf_about' && (
+          <main className="p-4 md:p-8">
+            <AboutModule />
+          </main>
+        )}
+        {activeTab === 'daf_admin' && (
+          <main className="p-4 md:p-8">
+            <DigiSoliaAdmin />
+          </main>
+        )}
       </div>
+
+      {/* MOBILE SLIDE-OVER DRAWER FOR DIGISOLIA MODULES (< 768px) */}
+      {isMobileDafDrawerOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs"
+            onClick={() => setIsMobileDafDrawerOpen(false)}
+          />
+          <div className="relative z-10 w-72 max-w-[85vw] bg-white dark:bg-[#0f1b29] h-full border-r border-[#E1E7EF] dark:border-slate-800 flex flex-col justify-between p-5 overflow-y-auto shadow-2xl">
+            <div className="space-y-5">
+              <div className="flex items-center justify-between border-b border-[#E1E7EF] dark:border-slate-800 pb-4">
+                <DigiSoliaLogo config={dafConfig} size="sm" showTagline />
+                <button
+                  type="button"
+                  onClick={() => setIsMobileDafDrawerOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 pb-1">
+                  Services DigiSolia
+                </div>
+                {dafNavItems.map(item => {
+                  const Icon = item.icon;
+                  const active = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(item.id);
+                        setIsMobileDafDrawerOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition ${
+                        active
+                          ? 'bg-[#163B65] text-white'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-[#F4F7FB] dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Icon className="w-4 h-4" />
+                        <span>{item.label}</span>
+                      </span>
+                      {item.badge !== undefined && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-[#2783C7] text-white text-[10px] tabular-nums">
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-[#E1E7EF] dark:border-slate-800">
+              <SyncStatusBadge compact />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MOBILE BOTTOM NAVIGATION BAR (< 820px) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0b3b36] border-t border-white/10 px-2 py-1.5 pb-[max(6px,env(safe-area-inset-bottom))] shadow-2xl flex items-center justify-around">
@@ -3089,5 +3332,13 @@ export default function App() {
       {/* Offline Status Indicator */}
       <OfflineIndicator />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <DigiSoliaProvider>
+      <AppContent />
+    </DigiSoliaProvider>
   );
 }

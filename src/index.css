@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -9,6 +10,13 @@
   --sidebar-text-muted: #99cfc5;
   --accent: #14b8a6;
   --accent-light: #2dd4bf;
+
+  /* DigiSolia App Framework Tokens */
+  --daf-primary: #163B65;
+  --daf-secondary: #2783C7;
+  --daf-bg: #F4F7FB;
+  --daf-border: #E1E7EF;
+  --daf-surface: #FFFFFF;
 }
 
 body {

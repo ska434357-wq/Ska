@@ -6,7 +6,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // Core Helpers
     function incoming() {
       return request.resource.data;
     }
@@ -19,11 +19,51 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
     }
 
-    // Validation for Product entity
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // DigiSolia RBAC Helpers
+    function isBootstrappedSuperAdmin() {
+      return isVerified() && request.auth.token.email == 'ska434357@gmail.com';
+    }
+
+    function hasAdminDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/administrators/$(request.auth.uid));
+    }
+
+    function adminDocData() {
+      return get(/databases/$(database)/documents/administrators/$(request.auth.uid)).data;
+    }
+
+    function isSuperAdmin() {
+      return isBootstrappedSuperAdmin() || (isVerified() && hasAdminDoc() && adminDocData().role == 'super_admin');
+    }
+
+    function isAppAdmin(appId) {
+      return isSuperAdmin() || (
+        isVerified() && hasAdminDoc() && adminDocData().role == 'app_admin' && (
+          adminDocData().assignedApps == '*' ||
+          adminDocData().assignedApps.matches('.*(^|,)' + appId + '(,|$).*')
+        )
+      );
+    }
+
+    function isSupportOrAdmin(appId) {
+      return isAppAdmin(appId) || (isVerified() && hasAdminDoc() && adminDocData().role == 'support_agent');
+    }
+
+    function isAnyAdmin() {
+      return isBootstrappedSuperAdmin() || (isVerified() && hasAdminDoc());
+    }
+
+    // =========================================================================
+    // EXISTING HOST APP VALIDATIONS (Pharmacie Laafi Zanga) - PRESERVED INTACT
+    // =========================================================================
     function isValidProduct(data) {
       return data.id is number &&
         data.no is number &&
@@ -36,10 +76,9 @@ service cloud.firestore {
         (!('fournisseur' in data) || (data.fournisseur is string && data.fournisseur.size() <= 100));
     }
 
-    // Validation for StockMovement entity
     function isValidMovement(data) {
       return data.id is string && data.id.size() <= 128 &&
-        data.date is string &&
+        data.date is string && data.date.size() <= 60 &&
         data.type in ['entree', 'sortie', 'ajustement'] &&
         data.productId is number &&
         data.productName is string && data.productName.size() <= 200 &&
@@ -47,24 +86,21 @@ service cloud.firestore {
         data.stockApres is number && data.stockApres >= 0;
     }
 
-    // Validation for PharmacyMeta entity
     function isValidMeta(data) {
       return data.initialized is bool;
     }
 
-    // Validation for Order entity
     function isValidOrder(data) {
       return data.id is string && data.id.size() <= 128 &&
         data.orderNumber is string && data.orderNumber.size() <= 50 &&
         data.supplier is string && data.supplier.size() <= 100 &&
-        data.createdAt is string &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
         data.status in ['brouillon', 'envoyee', 'receptionnee', 'annulee'] &&
         data.totalAmount is number && data.totalAmount >= 0 &&
         (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
         (!('receivedAt' in data) || (data.receivedAt is string && data.receivedAt.size() <= 50));
     }
 
-    // /products/{productId}
     match /products/{productId} {
       allow read: if true;
       allow create: if isSignedIn() && isValidId(productId) && isValidProduct(incoming());
@@ -72,15 +108,12 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(productId);
     }
 
-    // /movements/{movementId} - Immutable audit log
     match /movements/{movementId} {
       allow read: if true;
       allow create: if isSignedIn() && isValidId(movementId) && isValidMovement(incoming());
-      // Movements cannot be updated or deleted once committed to preserve pharmacy accounting integrity
       allow update, delete: if false;
     }
 
-    // /orders/{orderId}
     match /orders/{orderId} {
       allow read: if true;
       allow create: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming());
@@ -88,10 +121,156 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(orderId);
     }
 
-    // /meta/{metaId}
     match /meta/{metaId} {
       allow read: if true;
       allow write: if isSignedIn() && isValidId(metaId) && isValidMeta(incoming());
+    }
+
+    // =========================================================================
+    // DIGISOLIA APP FRAMEWORK (DAF) HARDENED VALIDATIONS & RULES
+    // =========================================================================
+    function isValidDigiSoliaApp(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 80 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        data.version is string && data.version.size() > 0 && data.version.size() <= 30 &&
+        data.status in ['actif', 'maintenance', 'beta'] &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+        (!('category' in data) || (data.category is string && data.category.size() <= 80)) &&
+        (!('usersCount' in data) || (data.usersCount is number && data.usersCount >= 0)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 60));
+    }
+
+    function isValidDigiSoliaUser(data) {
+      return data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() > 0 && data.email.size() <= 160 &&
+        data.appId is string && data.appId.size() > 0 && data.appId.size() <= 80 &&
+        data.role == 'user' &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        (!('firstName' in data) || (data.firstName is string && data.firstName.size() <= 80)) &&
+        (!('lastName' in data) || (data.lastName is string && data.lastName.size() <= 80)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&
+        (!('status' in data) || (data.status in ['actif', 'suspendu'])) &&
+        (!('lastLoginAt' in data) || (data.lastLoginAt is string && data.lastLoginAt.size() <= 60));
+    }
+
+    function isValidDigiSoliaAdmin(data) {
+      return data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() > 0 && data.email.size() <= 160 &&
+        data.role in ['super_admin', 'app_admin', 'support_agent', 'stats_reader'] &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120)) &&
+        (!('assignedApps' in data) || (data.assignedApps is string && data.assignedApps.size() <= 500)) &&
+        (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128));
+    }
+
+    function isValidDigiSoliaFeedback(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.appId is string && data.appId.size() > 0 && data.appId.size() <= 80 &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.category in ['avis', 'suggestion', 'bug', 'reclamation'] &&
+        data.message is string && data.message.size() >= 5 && data.message.size() <= 2000 &&
+        data.status in ['en_attente', 'en_cours', 'resolu', 'rejete'] &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        (!('rating' in data) || (data.rating is number && data.rating >= 1 && data.rating <= 5)) &&
+        (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 160)) &&
+        (!('userName' in data) || (data.userName is string && data.userName.size() <= 120)) &&
+        (!('adminNote' in data) || (data.adminNote is string && data.adminNote.size() <= 500)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 60));
+    }
+
+    function isValidDigiSoliaSupport(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.appId is string && data.appId.size() > 0 && data.appId.size() <= 80 &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.subject is string && data.subject.size() >= 3 && data.subject.size() <= 160 &&
+        data.message is string && data.message.size() >= 5 && data.message.size() <= 2000 &&
+        data.status in ['en_attente', 'en_cours', 'resolu', 'rejete'] &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        (!('priority' in data) || (data.priority in ['normale', 'urgente'])) &&
+        (!('technicalInfo' in data) || (data.technicalInfo is string && data.technicalInfo.size() <= 500)) &&
+        (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 160)) &&
+        (!('userName' in data) || (data.userName is string && data.userName.size() <= 120)) &&
+        (!('response' in data) || (data.response is string && data.response.size() <= 1000)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 60));
+    }
+
+    function isValidDigiSoliaNotification(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.appId is string && data.appId.size() > 0 && data.appId.size() <= 80 &&
+        data.title is string && data.title.size() > 0 && data.title.size() <= 140 &&
+        data.message is string && data.message.size() > 0 && data.message.size() <= 600 &&
+        data.type in ['info', 'alerte', 'mise_a_jour', 'maintenance'] &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 160));
+    }
+
+    function isValidAdminLog(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.actorUid is string && data.actorUid.size() > 0 && data.actorUid.size() <= 128 &&
+        data.action is string && data.action.size() > 0 && data.action.size() <= 120 &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        (!('actorEmail' in data) || (data.actorEmail is string && data.actorEmail.size() <= 160)) &&
+        (!('target' in data) || (data.target is string && data.target.size() <= 200));
+    }
+
+    // /apps/{appId}
+    match /apps/{appId} {
+      allow read: if true;
+      allow create, update: if isValidId(appId) && isValidDigiSoliaApp(incoming()) && (isSuperAdmin() || isAppAdmin(appId));
+      allow delete: if isValidId(appId) && isSuperAdmin();
+
+      // /apps/{appId}/feedback/{feedbackId}
+      match /feedback/{feedbackId} {
+        allow get: if isValidId(appId) && isValidId(feedbackId) && isSignedIn() && (existing().userId == request.auth.uid || isAnyAdmin());
+        allow list: if isAnyAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow create: if isValidId(appId) && isValidId(feedbackId) && isVerified() && isValidDigiSoliaFeedback(incoming()) && incoming().userId == request.auth.uid && incoming().appId == appId && incoming().status == 'en_attente';
+        allow update: if isValidId(appId) && isValidId(feedbackId) && isVerified() && isValidDigiSoliaFeedback(incoming()) && incoming().id == existing().id && incoming().userId == existing().userId && incoming().appId == existing().appId && isSupportOrAdmin(appId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt']);
+        allow delete: if isValidId(appId) && isValidId(feedbackId) && isSuperAdmin();
+      }
+
+      // /apps/{appId}/support/{ticketId}
+      match /support/{ticketId} {
+        allow get: if isValidId(appId) && isValidId(ticketId) && isSignedIn() && (existing().userId == request.auth.uid || isAnyAdmin());
+        allow list: if isAnyAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow create: if isValidId(appId) && isValidId(ticketId) && isVerified() && isValidDigiSoliaSupport(incoming()) && incoming().userId == request.auth.uid && incoming().appId == appId && incoming().status == 'en_attente';
+        allow update: if isValidId(appId) && isValidId(ticketId) && isVerified() && isValidDigiSoliaSupport(incoming()) && incoming().id == existing().id && incoming().userId == existing().userId && incoming().appId == existing().appId && isSupportOrAdmin(appId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'response', 'updatedAt']);
+        allow delete: if isValidId(appId) && isValidId(ticketId) && isSuperAdmin();
+      }
+    }
+
+    // /users/{userId} - Strict PII Isolation
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isSignedIn() && (request.auth.uid == userId || isAnyAdmin());
+      allow list: if isAnyAdmin();
+      allow create: if isValidId(userId) && isVerified() && request.auth.uid == userId && isValidDigiSoliaUser(incoming()) && incoming().uid == request.auth.uid && incoming().role == 'user';
+      allow update: if isValidId(userId) && isVerified() && isValidDigiSoliaUser(incoming()) && incoming().uid == existing().uid && (
+        (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'phone', 'appId', 'lastLoginAt'])) ||
+        isSuperAdmin() ||
+        isAppAdmin(incoming().appId)
+      );
+      allow delete: if isValidId(userId) && isSuperAdmin();
+    }
+
+    // /administrators/{adminId}
+    match /administrators/{adminId} {
+      allow get: if isValidId(adminId) && isSignedIn() && (request.auth.uid == adminId || isAnyAdmin());
+      allow list: if isAnyAdmin();
+      allow create, update: if isValidId(adminId) && isSuperAdmin() && isValidDigiSoliaAdmin(incoming());
+      allow delete: if isValidId(adminId) && isSuperAdmin();
+    }
+
+    // /notifications/{notificationId}
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update: if isValidId(notificationId) && isValidDigiSoliaNotification(incoming()) && (isSuperAdmin() || isAppAdmin(incoming().appId));
+      allow delete: if isValidId(notificationId) && isSuperAdmin();
+    }
+
+    // /admin_logs/{logId} - Immutable admin audit log
+    match /admin_logs/{logId} {
+      allow read: if isAnyAdmin();
+      allow create: if isValidId(logId) && isAnyAdmin() && isValidAdminLog(incoming()) && incoming().actorUid == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }

@@ -165,6 +165,129 @@
         }
       },
       "required": ["id", "orderNumber", "supplier", "createdAt", "status", "totalAmount"]
+    },
+    "DigiSoliaApp": {
+      "title": "DigiSoliaApp",
+      "description": "Application enregistrée dans l'écosystème DigiSolia App Framework",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 80, "description": "Identifiant unique de l'application" },
+        "name": { "type": "string", "maxLength": 120, "description": "Nom commercial de l'application" },
+        "description": { "type": "string", "maxLength": 500, "description": "Description du produit" },
+        "version": { "type": "string", "maxLength": 30, "description": "Numéro de version" },
+        "category": { "type": "string", "maxLength": 80, "description": "Secteur métier" },
+        "status": { "type": "string", "enum": ["actif", "maintenance", "beta"], "description": "Statut de déploiement" },
+        "usersCount": { "type": "number", "description": "Nombre d'utilisateurs actifs estimé" },
+        "updatedAt": { "type": "string", "description": "Date de mise à jour ISO" }
+      },
+      "required": ["id", "name", "version", "status"]
+    },
+    "DigiSoliaUser": {
+      "title": "DigiSoliaUser",
+      "description": "Profil utilisateur unifié DigiSolia",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "description": "UID Firebase Auth" },
+        "firstName": { "type": "string", "maxLength": 80, "description": "Prénom" },
+        "lastName": { "type": "string", "maxLength": 80, "description": "Nom" },
+        "email": { "type": "string", "maxLength": 160, "description": "Adresse e-mail" },
+        "phone": { "type": "string", "maxLength": 40, "description": "Téléphone facultatif" },
+        "appId": { "type": "string", "maxLength": 80, "description": "Application principale d'origine" },
+        "role": { "type": "string", "enum": ["user"], "description": "Rôle standard utilisateur" },
+        "status": { "type": "string", "enum": ["actif", "suspendu"], "description": "Statut du compte" },
+        "createdAt": { "type": "string", "description": "Date de création ISO" },
+        "lastLoginAt": { "type": "string", "description": "Dernière connexion ISO" }
+      },
+      "required": ["uid", "email", "appId", "role", "createdAt"]
+    },
+    "DigiSoliaAdmin": {
+      "title": "DigiSoliaAdmin",
+      "description": "Administrateur et rôle RBAC de la console DIGISOLIA ADMIN",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "description": "UID Firebase de l'administrateur" },
+        "email": { "type": "string", "maxLength": 160, "description": "E-mail professionnel" },
+        "displayName": { "type": "string", "maxLength": 120, "description": "Nom complet" },
+        "role": {
+          "type": "string",
+          "enum": ["super_admin", "app_admin", "support_agent", "stats_reader"],
+          "description": "Rôle DigiSolia Admin"
+        },
+        "assignedApps": { "type": "string", "maxLength": 500, "description": "Liste CSV ou * des apps gérées" },
+        "createdAt": { "type": "string", "description": "Date de nomination ISO" },
+        "createdBy": { "type": "string", "maxLength": 128, "description": "UID du super administrateur" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "DigiSoliaFeedback": {
+      "title": "DigiSoliaFeedback",
+      "description": "Avis, suggestion, signalement de bug ou réclamation utilisateur",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Identifiant unique" },
+        "appId": { "type": "string", "maxLength": 80, "description": "Application concernée" },
+        "userId": { "type": "string", "maxLength": 128, "description": "UID de l'auteur" },
+        "userEmail": { "type": "string", "maxLength": 160, "description": "E-mail de l'auteur" },
+        "userName": { "type": "string", "maxLength": 120, "description": "Nom de l'auteur" },
+        "category": { "type": "string", "enum": ["avis", "suggestion", "bug", "reclamation"], "description": "Catégorie" },
+        "rating": { "type": "number", "description": "Note sur 5 étoiles" },
+        "message": { "type": "string", "maxLength": 2000, "description": "Contenu du message" },
+        "status": { "type": "string", "enum": ["en_attente", "en_cours", "resolu", "rejete"], "description": "Statut de traitement" },
+        "adminNote": { "type": "string", "maxLength": 500, "description": "Réponse administrative" },
+        "createdAt": { "type": "string", "description": "Date de création ISO" },
+        "updatedAt": { "type": "string", "description": "Date de traitement ISO" }
+      },
+      "required": ["id", "appId", "userId", "category", "message", "status", "createdAt"]
+    },
+    "DigiSoliaSupport": {
+      "title": "DigiSoliaSupport",
+      "description": "Demande d'assistance technique dans le Centre d'assistance",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Identifiant unique du ticket" },
+        "appId": { "type": "string", "maxLength": 80, "description": "Application source" },
+        "userId": { "type": "string", "maxLength": 128, "description": "UID du demandeur" },
+        "userEmail": { "type": "string", "maxLength": 160, "description": "E-mail du demandeur" },
+        "userName": { "type": "string", "maxLength": 120, "description": "Nom du demandeur" },
+        "subject": { "type": "string", "maxLength": 160, "description": "Objet de la demande" },
+        "priority": { "type": "string", "enum": ["normale", "urgente"], "description": "Niveau d'urgence" },
+        "message": { "type": "string", "maxLength": 2000, "description": "Description détaillée" },
+        "technicalInfo": { "type": "string", "maxLength": 500, "description": "Environnement technique" },
+        "status": { "type": "string", "enum": ["en_attente", "en_cours", "resolu", "rejete"], "description": "Statut" },
+        "response": { "type": "string", "maxLength": 1000, "description": "Réponse du support" },
+        "createdAt": { "type": "string", "description": "Date ISO" },
+        "updatedAt": { "type": "string", "description": "Date de mise à jour ISO" }
+      },
+      "required": ["id", "appId", "userId", "subject", "message", "status", "createdAt"]
+    },
+    "DigiSoliaNotification": {
+      "title": "DigiSoliaNotification",
+      "description": "Notification diffusée aux utilisateurs d'une ou de toutes les applications DigiSolia",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Identifiant unique" },
+        "appId": { "type": "string", "maxLength": 80, "description": "Identifiant d'application ou 'all'" },
+        "title": { "type": "string", "maxLength": 140, "description": "Titre de la notification" },
+        "message": { "type": "string", "maxLength": 600, "description": "Corps du message" },
+        "type": { "type": "string", "enum": ["info", "alerte", "mise_a_jour", "maintenance"], "description": "Type d'annonce" },
+        "createdAt": { "type": "string", "description": "Date d'envoi ISO" },
+        "createdBy": { "type": "string", "maxLength": 160, "description": "Auteur administrateur" }
+      },
+      "required": ["id", "appId", "title", "message", "type", "createdAt"]
+    },
+    "DigiSoliaAdminLog": {
+      "title": "DigiSoliaAdminLog",
+      "description": "Journal immuable des opérations d'administration DigiSolia",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Identifiant du log" },
+        "actorUid": { "type": "string", "maxLength": 128, "description": "UID de l'administrateur" },
+        "actorEmail": { "type": "string", "maxLength": 160, "description": "E-mail de l'administrateur" },
+        "action": { "type": "string", "maxLength": 120, "description": "Type d'action effectuée" },
+        "target": { "type": "string", "maxLength": 200, "description": "Cible de l'opération" },
+        "createdAt": { "type": "string", "description": "Horodatage ISO" }
+      },
+      "required": ["id", "actorUid", "action", "createdAt"]
     }
   },
   "firestore": {
@@ -191,6 +314,34 @@
         "$ref": "#/entities/PharmacyMeta"
       },
       "description": "Métadonnées globales du système"
+    },
+    "/apps/{appId}": {
+      "schema": { "$ref": "#/entities/DigiSoliaApp" },
+      "description": "Registre central des applications de l'écosystème DigiSolia"
+    },
+    "/apps/{appId}/feedback/{feedbackId}": {
+      "schema": { "$ref": "#/entities/DigiSoliaFeedback" },
+      "description": "Avis, suggestions, bugs et réclamations isolés par application"
+    },
+    "/apps/{appId}/support/{ticketId}": {
+      "schema": { "$ref": "#/entities/DigiSoliaSupport" },
+      "description": "Tickets d'assistance technique isolés par application"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/DigiSoliaUser" },
+      "description": "Comptes et profils utilisateurs DigiSolia"
+    },
+    "/administrators/{adminId}": {
+      "schema": { "$ref": "#/entities/DigiSoliaAdmin" },
+      "description": "Administrateurs DigiSolia Admin et rôles RBAC"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/DigiSoliaNotification" },
+      "description": "Notifications globales ou ciblées par application"
+    },
+    "/admin_logs/{logId}": {
+      "schema": { "$ref": "#/entities/DigiSoliaAdminLog" },
+      "description": "Journal d'audit des opérations administratives"
     }
   }
 }
